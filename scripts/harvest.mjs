@@ -7,6 +7,7 @@
  *   node scripts/harvest.mjs                # full run (step A+B+C)
  *   node scripts/harvest.mjs --pilot        # hanya 5 place + 5 channel (uji mekanisme)
  *   node scripts/harvest.mjs --refresh-streams  # resolve ulang semua redirect (step C saja)
+ *   node scripts/harvest.mjs --retry-unresolved # step C, ulangi channel yang url-nya null
  */
 import { chromium } from 'playwright';
 import fs from 'node:fs';
@@ -20,6 +21,7 @@ for (const d of [RAW, PAGES]) fs.mkdirSync(d, { recursive: true });
 const args = new Set(process.argv.slice(2));
 const PILOT = args.has('--pilot');
 const REFRESH = args.has('--refresh-streams');
+const RETRY = args.has('--retry-unresolved');
 
 const BATCH = 7;
 const DELAY_MS = 150;
@@ -126,69 +128,42 @@ async function stepC(channelIds) {
     : {};
   if (REFRESH) for (const k of Object.keys(streams)) delete streams[k];
 
-  // Capture 302 Location at the network level (works around page CORS).
-  const pending = new Map();
-  page.on('response', (res) => {
-    try {
-      const url = res.url();
-      if (!url.includes('/api/ara/content/listen/')) return;
-      const m = url.match(/listen\/([^/]+)\/channel/);
-      if (!m) return;
-      const chId = m[1];
-      const status = res.status();
-      const loc = res.headers()['location'];
-      const contentType = res.headers()['content-type'] ?? '';
-      if (status === 302 && loc) {
-        const finalUrl = loc.startsWith('http') ? loc : new URL(loc, url).href;
-        pending.set(chId, { url: finalUrl, contentType });
-      } else if (status >= 400) {
-        pending.set(chId, { url: null, contentType, status });
-      }
-    } catch {}
-  });
-  // CDP fallback captures redirects the response handler may miss.
-  const cdp = await ctx.newCDPSession(page);
-  await cdp.send('Network.enable');
-  cdp.on('Network.requestWillBeSent', (p) => {
-    try {
-      const url = p.request.url;
-      const m = url.match(/listen\/([^/]+)\/channel/);
-      if (!m) return;
-      const loc = p.redirectResponse?.headers?.['location'] ?? p.redirectResponse?.headers?.['Location'];
-      if (loc) {
-        const finalUrl = loc.startsWith('http') ? loc : new URL(loc, p.redirectResponse.url).href;
-        pending.set(m[1], {
-          url: finalUrl,
-          contentType: p.redirectResponse.headers['content-type'] ?? '',
-        });
-      }
-    } catch {}
-  });
-
   let done = 0;
-  const todo = channelIds.filter((id) => !(id in streams));
+  const todo = channelIds.filter(
+    (id) => !(id in streams) || (RETRY && streams[id].url == null)
+  );
   console.log(`[stepC] ${todo.length} channel perlu resolve (total ${channelIds.length})`);
   await batches(todo, async (chId) => {
-    pending.delete(chId);
-    page.evaluate(
-      (id) => fetch('/api/ara/content/listen/' + id + '/channel.mp3').catch(() => {}),
-      chId
-    ).catch(() => {});
-    await sleep(80); // beri waktu 302 tiba di network layer
-    for (let w = 0; w < 12 && !pending.has(chId); w++) await sleep(100);
-    const hit = pending.get(chId);
-    if (hit?.url) {
-      const u = hit.url;
-      streams[chId] = {
-        url: u,
-        insecure: u.startsWith('http://'),
-        format: /m3u8/i.test(u) || /mpegurl/i.test(hit.contentType ?? '')
-          ? 'hls'
-          : /aac/i.test(u) || /aac/i.test(hit.contentType ?? '')
-            ? 'aac'
-            : 'mp3',
-      };
-    } else {
+    // Request di level browser-context (bukan page fetch): bebas CORS dan
+    // 302-nya bisa dibaca langsung via maxRedirects: 0.
+    try {
+      const res = await ctx.request.get(
+        BASE + '/api/ara/content/listen/' + chId + '/channel.mp3',
+        { maxRedirects: 0 }
+      );
+      const status = res.status();
+      if (status >= 300 && status < 400) {
+        const loc = res.headers()['location'];
+        if (loc) {
+          const finalUrl = loc.startsWith('http') ? loc : new URL(loc, BASE + '/').href;
+          const contentType = res.headers()['content-type'] ?? '';
+          const u = finalUrl;
+          streams[chId] = {
+            url: u,
+            insecure: u.startsWith('http://'),
+            format: /m3u8/i.test(u) || /mpegurl/i.test(contentType)
+              ? 'hls'
+              : /aac/i.test(u) || /aac/i.test(contentType)
+                ? 'aac'
+                : 'mp3',
+          };
+        } else {
+          streams[chId] = { url: null, insecure: false, format: null };
+        }
+      } else if (status >= 400 || status >= 200) {
+        streams[chId] = { url: null, insecure: false, format: null };
+      }
+    } catch {
       streams[chId] = { url: null, insecure: false, format: null };
     }
     done++;
