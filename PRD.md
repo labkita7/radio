@@ -121,4 +121,7 @@ Tidak ada: login/akun, favorites/sync, mode Jingle, statistik listener, refresh 
 
 ## Catatan Eksekusi
 
-(kosong — diisi eksekutor saat menemukan penyimpangan)
+1. **Angka tempat:** PRD menulis 11.448 tempat / 34.447 channel. Aktual hasil harvest: **12.564 tempat** dan **24.396 channel ter-list** (sum `sizes` = 38.405 — ternyata `sizes` bukan jumlah channel per tempat, melainkan bobot popularitas). Validasi PRD diubah: jumlah place harus == 12.564 dan total channel ter-list == jumlah channel di channels.json (konsistensi internal, bukan angka magic).
+2. **maplibre-gl v6.7.0** terpasang (PRD menulis v5; API `setProjection({type:'globe'})` tetap ada dan dipakai). Dicatat karena versi lockfile berbeda dari PRD.
+3. **Verifikasi render globe (pixel) tidak dapat dilakukan di sandbox ini**: tidak ada WebGL2/GPU — semua kombinasi flag (`--use-gl=angle`, swiftshader, headed + xvfb) mengembalikan context null. Kode Globe mengikuti API resmi maplibre v6 dan pernah termuat via `window.__rgMap` di sesi dev, tapi canvas membutuhkan environment dengan GPU. Bukan bug aplikasi; keterbatasan lingkungan eksekusi.
+4. **Resolusi stream URL awal rendah lalu diperbaiki.** Step C versi pertama (event-capture `page.on('response')` + CDP) hanya resolve 1.632/24.396. Diagnosa: mekanisme capture tidak andal untuk fetch dari page context. Diperbaiki dengan `ctx.request.get(..., {maxRedirects: 0})` (request level browser-context — tetap via browser Playwright, lolos Cloudflare, bebas CORS, 302 terbaca langsung). Pilot 10/10 sukses, lalu retry penuh (`--retry-unresolved`): **24.396/24.396 resolved**. Distribusi format final: mp3 22.917, aac 1.479, hls 0 → hls.js TIDAK dibutuhkan (PRD §7). Flag `--retry-unresolved` ditambahkan ke harvest.mjs.
