@@ -1,4 +1,4 @@
-import type { Channel, ChannelsData, PlacesData } from './types';
+import type { Channel, ChannelsData, Place, PlacesData } from './types';
 
 export interface Dataset {
   places: PlacesData;
@@ -7,6 +7,8 @@ export interface Dataset {
   byId: Map<string, Channel>;
   /** placeId -> Channel[] */
   byPlace: Map<string, Channel[]>;
+  /** placeId -> Place */
+  placeById: Map<string, Place>;
 }
 
 export async function loadDataset(): Promise<Dataset> {
@@ -35,11 +37,13 @@ export async function loadDataset(): Promise<Dataset> {
 
   const byId = new Map<string, Channel>();
   const byPlace = new Map<string, Channel[]>();
+  const placeById = new Map<string, Place>();
+  for (const p of places.places) placeById.set(p.id, p);
   for (const ch of channels.channels) {
     byId.set(ch.id, ch);
     const list = byPlace.get(ch.placeId);
     if (list) list.push(ch);
     else byPlace.set(ch.placeId, [ch]);
   }
-  return { places, channels, byId, byPlace };
+  return { places, channels, byId, byPlace, placeById };
 }

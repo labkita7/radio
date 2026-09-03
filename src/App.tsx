@@ -10,7 +10,7 @@ export default function App() {
   const [dataset, setDataset] = useState<Dataset | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedPlace, setSelectedPlace] = useState<Place | null>(null);
-  const { dispatch } = useApp();
+  const { currentChannelId, dispatch } = useApp();
 
   useEffect(() => {
     loadDataset()
@@ -36,6 +36,11 @@ export default function App() {
     return <div className="app-loading">Memuat dataset…</div>;
   }
 
+  const currentChannel = dataset.byId.get(currentChannelId ?? '') ?? null;
+  const currentPlace = currentChannel
+    ? dataset.placeById.get(currentChannel.placeId) ?? null
+    : null;
+
   return (
     <>
       <Globe dataset={dataset} selectedPlace={selectedPlace} onSelectPlace={setSelectedPlace} />
@@ -45,7 +50,7 @@ export default function App() {
         onPlay={handlePlay}
         onClose={() => setSelectedPlace(null)}
       />
-      <PlayerBar />
+      <PlayerBar channel={currentChannel} place={currentPlace} />
     </>
   );
 }
