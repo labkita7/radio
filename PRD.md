@@ -111,13 +111,13 @@ Tidak ada: login/akun, favorites/sync, mode Jingle, statistik listener, refresh 
 
 ## 8. Definition of Done
 
-- [ ] `pnpm build` sukses tanpa error/l warning baru.
-- [ ] Globe render seluruh tempat dari `places.json`; drag/rotate/zoom & auto-rotate berfungsi.
-- [ ] Klik kota → panel dengan daftar stasiun yang benar (spot-check 5 kota di 5 benua berbeda).
-- [ ] Minimal 1 stasiun per benua berhasil play audio (spot-check via preview).
-- [ ] Zero request runtime ke `radio.garden` / `*.radio.garden` (verifikasi network tab / HAR: hanya origin sendiri + stream stasiun).
-- [ ] Mobile 390×844 usable (panel & player tidak menutupi globe secara permanen).
-- [ ] README berisi: cara harvest, cara run dev, cara build.
+- [x] `pnpm build` sukses tanpa error/ warning baru (warning ukuran chunk bawaan vite).
+- [ ] Globe render seluruh tempat dari `places.json`; drag/rotate/zoom & auto-rotate berfungsi. *(butuh environment ber-GPU — lihat Catatan Eksekusi #3)*
+- [ ] Klik kota → panel dengan daftar stasiun yang benar (spot-check 5 kota di 5 benua berbeda). *(butuh environment ber-GPU)*
+- [ ] Minimal 1 stasiun per benua berhasil play audio (spot-check via preview). *(playback stream nyata terverifikasi via harness headless — Catatan Eksekusi #5; spot-check per benua via klik globe butuh GPU)*
+- [x] Zero request runtime ke `radio.garden` / `*.radio.garden` (tidak ada referensi radio.garden di `src/`; runtime hanya fetch `/data/*` + stream stasiun).
+- [ ] Mobile 390×844 usable (panel & player tidak menutupi globe secara permanen). *(CSS bottom-sheet diimplementasikan; verifikasi pixel butuh environment ber-GPU)*
+- [x] README berisi: cara harvest, cara run dev, cara build.
 
 ## Catatan Eksekusi
 
@@ -125,3 +125,6 @@ Tidak ada: login/akun, favorites/sync, mode Jingle, statistik listener, refresh 
 2. **maplibre-gl v6.7.0** terpasang (PRD menulis v5; API `setProjection({type:'globe'})` tetap ada dan dipakai). Dicatat karena versi lockfile berbeda dari PRD.
 3. **Verifikasi render globe (pixel) tidak dapat dilakukan di sandbox ini**: tidak ada WebGL2/GPU — semua kombinasi flag (`--use-gl=angle`, swiftshader, headed + xvfb) mengembalikan context null. Kode Globe mengikuti API resmi maplibre v6 dan pernah termuat via `window.__rgMap` di sesi dev, tapi canvas membutuhkan environment dengan GPU. Bukan bug aplikasi; keterbatasan lingkungan eksekusi.
 4. **Resolusi stream URL awal rendah lalu diperbaiki.** Step C versi pertama (event-capture `page.on('response')` + CDP) hanya resolve 1.632/24.396. Diagnosa: mekanisme capture tidak andal untuk fetch dari page context. Diperbaiki dengan `ctx.request.get(..., {maxRedirects: 0})` (request level browser-context — tetap via browser Playwright, lolos Cloudflare, bebas CORS, 302 terbaca langsung). Pilot 10/10 sukses, lalu retry penuh (`--retry-unresolved`): **24.396/24.396 resolved**. Distribusi format final: mp3 22.917, aac 1.479, hls 0 → hls.js TIDAK dibutuhkan (PRD §7). Flag `--retry-unresolved` ditambahkan ke harvest.mjs.
+5. **Dua bug playback ditemukan saat review pasca-merge PR #2, keduanya diperbaiki:**
+   - **Judul stasiun kosong di seluruh dataset.** PRD §3 menulis nama stasiun di `items[].title`; realita API: judul ada di **`item.page.title`** (item = `{page: {url, title, ...}}`). Akibatnya semua 24.396 channel masuk dataset tanpa `title`. `build-dataset.mjs` diperbaiki (`it?.page?.title`), lalu Step B di-re-harvest penuh (12.564 page dump, ±6 menit; Step C dilewati karena `streams.json` direkonstruksi dari dataset lama). Dataset final: 12.564 tempat, 24.396 channel, **0 judul kosong**, 24.396/24.396 stream resolved, distribusi format identik (mp3 22.917, aac 1.479) — konsisten internal dengan harvest sebelumnya.
+   - **PlayerBar tidak memutar `streamUrl`.** `<audio>.src` diisi path API radio.garden relatif (`/api/ara/content/listen/{id}/channel.mp3`) yang tidak ada di origin replika → semua stream "Stream offline". Diperbaiki: src = `channel.streamUrl` dari dataset; plus nama stasiun + kota kini tampil, tombol "coba lagi" (reload src) ditambahkan, `Space` = play/pause (diabaikan saat fokus di input), volume slider kini benar-benar disetel ke `audio.volume` (sebelumnya hanya persist), dan ganti stasiun saat playing memanggil ulang `play()`. Verifikasi runtime via harness headless Playwright (stream nyata connect tanpa error, `networkState=2`); keterbatasan: sandbox tanpa WebGL2 (pixel globe) dan tanpa audio device, sehingga pendengaran fisik/spot-check klik-globe tetap butuh mesin ber-GPU.

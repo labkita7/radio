@@ -1,25 +1,73 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { Channel, Place } from '../types';
 import { useApp, usePersistVolume } from '../state/AppContext';
 
-export default function PlayerBar() {
+interface PlayerBarProps {
+  channel: Channel | null;
+  place: Place | null;
+}
+
+export default function PlayerBar({ channel, place }: PlayerBarProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
+  const [streamError, setStreamError] = useState(false);
   const { currentChannelId, isPlaying, volume, dispatch } = useApp();
   usePersistVolume(volume);
 
-  // Satu elemen <audio> global: sumber src diganti saat channel berubah.
+  // Satu elemen <audio> global: src diganti saat channel berubah.
   useEffect(() => {
     const audio = audioRef.current;
-    if (!audio || !currentChannelId) return;
-    audio.src = `/api/ara/content/listen/${currentChannelId}/channel.mp3`;
+    if (!audio || !channel?.streamUrl) return;
+    setStreamError(false);
+    audio.src = channel.streamUrl;
     audio.load();
-  }, [currentChannelId]);
+  }, [channel]);
 
   useEffect(() => {
     const audio = audioRef.current;
-    if (!audio) return;
+    if (!audio || !currentChannelId) return;
     if (isPlaying) audio.play().catch(() => dispatch({ type: 'SET_PLAYING', playing: false }));
     else audio.pause();
-  }, [isPlaying, dispatch]);
+  }, [isPlaying, currentChannelId, dispatch]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (audio) audio.volume = volume;
+  }, [volume]);
+
+  // Space = play/pause; abaikan saat fokus ada di input agar tidak merusak ketikan.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== 'Space' || !currentChannelId) return;
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      dispatch({ type: 'TOGGLE_PLAY' });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [currentChannelId, dispatch]);
+
+  const handleRetry = () => {
+    const audio = audioRef.current;
+    if (!audio || !channel?.streamUrl) return;
+    setStreamError(false);
+    audio.src = channel.streamUrl;
+    audio.load();
+    dispatch({ type: 'SET_PLAYING', playing: true });
+  };
+
+  const status = streamError
+    ? 'Stream offline'
+    : isPlaying
+      ? 'Playing'
+      : channel
+        ? 'Paused'
+        : '';
 
   return (
     <div className="player-bar">
@@ -30,24 +78,22 @@ export default function PlayerBar() {
         onStalled={() => dispatch({ type: 'SET_PLAYING', playing: true })}
         onError={() => {
           dispatch({ type: 'SET_PLAYING', playing: false });
-          // State error ditandai via data-attribute; UI menampilkan "Stream offline".
-          document.body.dataset.streamError = 'true';
+          setStreamError(true);
         }}
       />
       <div className="player-info">
         <span className="station">
-          {currentChannelId
-            ? `Channel ${currentChannelId}`
-            : 'Pilih stasiun dari panel kota'}
+          {channel ? channel.title : 'Pilih stasiun dari panel kota'}
         </span>
         <span className="state" aria-live="polite">
-          {document.body.dataset.streamError
-            ? 'Stream offline'
-            : isPlaying
-              ? 'Playing'
-              : 'Paused'}
+          {channel ? [place?.title, status].filter(Boolean).join(' · ') : ''}
         </span>
       </div>
+      {streamError && channel && (
+        <button type="button" onClick={handleRetry} aria-label="Coba lagi" title="Coba lagi">
+          ↻
+        </button>
+      )}
       <button
         type="button"
         onClick={() => dispatch({ type: 'TOGGLE_PLAY' })}

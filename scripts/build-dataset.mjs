@@ -51,7 +51,8 @@ for (let i = 0; i < ids.length; i++) {
       channels.push({
         id: m[2],
         placeId: ids[i],
-        title: it.title,
+        // Judul stasiun ada di item.page (bukan item) — lihat PRD Catatan Eksekusi #5.
+        title: it?.page?.title ?? it?.title ?? '',
         slug: m[1],
         streamUrl: streams[m[2]]?.url ?? null,
         format: streams[m[2]]?.format ?? null,
